@@ -6,8 +6,8 @@ from google import genai
 from google.genai import types
 
 # --- Configuration ---
-TELEGRAM_BOT_TOKEN = "8846195077:AAHuij1mHPhE8-DkKN0wEu_FFtGPhMet0IY"
-GEMINI_API_KEY = "AQ.Ab8RN6LYTmD9mawkF4brsBbK4x3d2tgSI70jaDiXtm6VN9wD4w"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # Insert the persona rules extracted from your chat logs
 PERSONA_SYSTEM_INSTRUCTION = """
