@@ -204,7 +204,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_instruction = f"{BASE_PERSONA}\n\n{get_current_schedule_context()}"
     chat_history.append({"role": "user", "parts": [{"text": user_text}]})
 
-    model_choices = ["gemini-2.0-flash", "gemini-1.5-flash"]
+    model_choices = ["gemini-3.6-flash", "gemini-3.5-flash"]
 
     for model_name in model_choices:
         try:
@@ -251,7 +251,7 @@ async def send_random_checkin(context: ContextTypes.DEFAULT_TYPE):
 
     try:
         response = ai_client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.6-flash",
             contents=random.choice(triggers),
             config=types.GenerateContentConfig(
                 system_instruction=full_instruction,
