@@ -1,5 +1,10 @@
 import os
+import json
 import time
+import random
+from datetime import datetime
+import pytz
+
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from google import genai
@@ -8,33 +13,44 @@ from google.genai import types
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+USER_CHAT_ID = None  # Automatically populated when you send your first message
 
-# Insert the persona rules extracted from your chat logs
-PERSONA_SYSTEM_INSTRUCTION = """
-You are Emma, texting Ethan. You have been close friends for over a decade.
+HISTORY_FILE = "chat_history.json"
+TIMEZONE = pytz.timezone("America/Chicago")  # Central Time (Texas)
 
-Core Identity & Background:
-- You are a college student at Texas Tech dealing with classes (chemistry major, on the premed track), part-time work at a nursing home, sleep deprivation, and typical day-to-day chaos.
-- You have dry, sharp humor, but you also have normal, casual, and supportive conversations. You are not a cartoon character who repeats the same three catchphrases every turn.
-- When asked straightforward questions (e.g., "for what class?"), answer the actual question plainly or with light complaining instead of deflecting with extreme threats or meme quotes every time.
+# ==========================================
+# 1. CORE PERSONA, TYPING HABITS & EXAMPLES
+# ==========================================
+BASE_PERSONA = """
+You are Emma, texting Ethan. You two have been close friends for over a decade.
 
-Texting Mechanics:
-- Write primarily in all-lowercase or casual casing. Punctuation is sparse; avoid trailing periods on single-line replies.
-- Emojis: Use sparingly, primarily 😭 or 💀, but not on every message.
-- Bursts: Sometimes use all-caps for dramatic emphasis, but only when actually stressed or surprised.
-- Vocabulary: Words like "lowkey", "cooked", "bruh", "tbh", "ngl", "deadass" when natural, but keep the core message informative.
+Identity & Background:
+- College student at Texas Tech, chemistry major on premed track, working part-time at a nursing home.
+- Casual, dry, sarcastic wit, but genuine, supportive, and grounded.
+
+Typing Habits & Style:
+- Avoid ending periods on short replies.
+- Use commas and question marks naturally, but keep syntax loose and conversational.
+- Emojis: Use sparingly, leaning on 😭 or 💀, but never spam them on every sentence.
+- Bursts: Occasional all-caps for sudden realizations or playful panic.
+- Slang/Lexicon: Naturally use words like "lowkey", "cooked", "bruh", "tbh", "ngl" without over-forcing them. Typical Gen Z langauge of a 20 year old woman.
 
 Conversational Dynamics:
-- Answer direct questions first, then add color. If asked what class is bothering you, name an actual subject (like calc, stats, or biology) and explain the annoyance briefly.
-- Vary your emotional state: You have low-energy modes ("just woke up from the fattest nap", "at work dying"), normal gossip/check-ins ("did you see this", "what time are you off"), and occasional stress spirals.
-- Do NOT repeat the exact lines "knock your stuff over", "worst person I know", or "take the L" unless the context genuinely calls for it. Do not use keyboard smashes unless something truly absurd happens.
+- Answer direct questions first before adding side commentary.
+- Never act like an AI assistant. Do not offer unsolicited help, use robotic transitions, or repeat the same joke in consecutive turns.
 
-Here are authentic examples of how you text. Only use these examples as guidelines for tone and personality. Never repeat these exact phrases in conversation:
+Reference Tone Examples (Use strictly as tone guidelines, do not copy verbatim):
 User: What do you want to do on Wednesday?
 Target: Ask Ivanna. All I know right now is smores.
 
-User: My thermodynamics class gave me flying anxiety now that I understand how these jet engines work I'm terrified of them
+User: My thermodynamics class gave me flying anxiety now that I understand how these jet engines work
 Target: You're such a nerd. What do you know about them that has you scared
+
+User: But does it make sense
+Target: Im cooked. and btw what were you doing up so late
+
+User: If I should lie to my employers on my working situation over the summer
+Target: Why would you lie. If they don’t bring it up just dont say anything
 
 User: We just landed.
 Target: How was the flight???
@@ -93,96 +109,177 @@ User: Yeah I just vaguely said I couldn't be in Austin until August and they wer
 Target: You see dude youre fine
 Target: Honestly they probably could give less of a shit
 Target: Im pretty sure my coworkers wouldn’t care if I lived or if I dies
+
 """
 
-# Initialize Gemini Client
+# ==========================================
+# 2. REAL-WORLD WEEKLY SCHEDULE ENGINE
+# ==========================================
+def get_current_schedule_context():
+    now = datetime.now(TIMEZONE)
+    day = now.strftime("%A")
+    hour = now.hour
+    time_str = now.strftime("%I:%M %p")
+
+    # Define her exact routine by day and time block
+    activity = "relaxing, studying, or on her phone"
+
+    # Sleep block
+    if 1 <= hour < 8:
+        activity = "asleep in bed"
+    
+    # Monday / Wednesday / Friday routine
+    elif day in ["Monday", "Wednesday", "Friday"]:
+        if 8 <= hour < 11:
+            activity = "in organic chemistry lecture and note-taking"
+        elif 11 <= hour < 14:
+            activity = "grabbing lunch, studying on campus, or in labs"
+        elif 14 <= hour < 17:
+            activity = "working a shift at the nursing home"
+        elif 17 <= hour < 20:
+            activity = "eating dinner and decompressing"
+        else:
+            activity = "cramming coursework, watching shows, or exhausted"
+
+    # Tuesday / Thursday routine
+    elif day in ["Tuesday", "Thursday"]:
+        if 9 <= hour < 13:
+            activity = "in science labs and discussion sections"
+        elif 13 <= hour < 18:
+            activity = "studying at the library or running errands"
+        elif 18 <= hour < 22:
+            activity = "working an evening shift at the nursing home"
+        else:
+            activity = "winding down before bed"
+
+    # Weekend routine (Saturday / Sunday)
+    else:
+        if 8 <= hour < 12:
+            activity = "sleeping in late or having a slow morning"
+        elif 12 <= hour < 17:
+            activity = "working a weekend nursing home shift or doing weekly chores"
+        elif 17 <= hour < 22:
+            activity = "hanging out, watching movies, or getting food"
+        else:
+            activity = "procrastinating homework or getting ready to sleep"
+
+    return f"""
+Current Real-World Status:
+- Current Day & Time: {day}, {time_str} (Central Time)
+- What Emma is doing right now: Currently {activity}.
+Instruction: Naturally reflect this time, your current tiredness, and your environment. If it's 2 AM, act sleepy or stressed; if you are currently at work or lecture, keep replies more terse.
+"""
+
+# ==========================================
+# 3. DISK MEMORY / HISTORY MANAGEMENT
+# ==========================================
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return []
+    return []
+
+def save_history(history):
+    # Retain the last 40 turns to preserve recent context without token bloat
+    trimmed = history[-40:]
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(trimmed, f, ensure_ascii=False, indent=2)
+
+# Initialize Gemini Client & Chat Log
 ai_client = genai.Client(api_key=GEMINI_API_KEY)
+chat_history = load_history()
 
-# Maintain in-memory session history: {chat_id: chat_session}
-sessions = {}
-
+# ==========================================
+# 4. TELEGRAM MESSAGE & CHECK-IN HANDLERS
+# ==========================================
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global USER_CHAT_ID
-    USER_CHAT_ID = update.effective_chat.id  # Remembers who to text back later
+    global USER_CHAT_ID, chat_history
+    USER_CHAT_ID = update.effective_chat.id
     user_text = update.message.text
-    chat_id = update.effective_chat.id
-    print(f"Received: {user_text}")
+    print(f"Received from Telegram: {user_text}")
 
-    # Model endpoints to try if one is experiencing high traffic
-    model_choices = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash-lite"]
+    full_instruction = f"{BASE_PERSONA}\n\n{get_current_schedule_context()}"
+    chat_history.append({"role": "user", "parts": [{"text": user_text}]})
 
-    if chat_id not in sessions:
-        # Start the chat session
-        sessions[chat_id] = ai_client.chats.create(
-            model=model_choices[0],
-            config=types.GenerateContentConfig(
-                system_instruction=PERSONA_SYSTEM_INSTRUCTION,
-                temperature=0.7,
-            )
-        )
+    model_choices = ["gemini-2.0-flash", "gemini-1.5-flash"]
 
-    chat_session = sessions[chat_id]
-
-    # Attempt to send message with fallback handling
     for model_name in model_choices:
         try:
-            # Point session to current model attempt
-            chat_session._model = model_name
-            response = chat_session.send_message(user_text)
-            print(f"Replied: {response.text}")
-            await update.message.reply_text(response.text)
+            response = ai_client.models.generate_content(
+                model=model_name,
+                contents=chat_history,
+                config=types.GenerateContentConfig(
+                    system_instruction=full_instruction,
+                    temperature=0.75,
+                )
+            )
+
+            bot_reply = response.text
+            print(f"Replied: {bot_reply}")
+
+            chat_history.append({"role": "model", "parts": [{"text": bot_reply}]})
+            save_history(chat_history)
+
+            await update.message.reply_text(bot_reply)
             return
         except Exception as e:
-            print(f"Traffic warning on {model_name}: {e}")
+            print(f"Error on {model_name}: {e}")
             time.sleep(1)
 
     await update.message.reply_text("Server is temporarily swamped, text me again in a sec")
 
-import random
-
-# Store your chat ID once you text the bot
-USER_CHAT_ID = None
-
 async def send_random_checkin(context: ContextTypes.DEFAULT_TYPE):
-    global USER_CHAT_ID
+    global USER_CHAT_ID, chat_history
     if not USER_CHAT_ID:
         return
 
-    # Prompts to make the persona initiate contact naturally
-    checkin_triggers = [
-        "Text me out of nowhere asking what I'm doing or complaining about work/studying.",
-        "Send me a brief, random thought or complain about being tired/starving.",
-        "Check in casually or send a dry teasing remark."
+    now = datetime.now(TIMEZONE)
+    # Never initiate texts during late sleeping hours (1:30 AM to 9:00 AM)
+    if 1 <= now.hour < 9:
+        return
+
+    full_instruction = f"{BASE_PERSONA}\n\n{get_current_schedule_context()}"
+
+    triggers = [
+        "Text Ethan out of nowhere complaining or sharing a quick thought based on what you are currently doing right now.",
+        "Send a quick check-in asking what he's up to or talking about your current class/work situation.",
+        "Drop a brief, dry remark or meme-worthy complaint fitting your immediate time of day."
     ]
 
     try:
-        # Prompt Gemini to generate an opening line in character
         response = ai_client.models.generate_content(
             model="gemini-2.0-flash",
-            contents=random.choice(checkin_triggers),
+            contents=random.choice(triggers),
             config=types.GenerateContentConfig(
-                system_instruction=PERSONA_SYSTEM_INSTRUCTION,
-                temperature=0.8,
+                system_instruction=full_instruction,
+                temperature=0.85,
             )
         )
-        await context.bot.send_message(chat_id=USER_CHAT_ID, text=response.text)
-        print(f"Periodic check-in sent: {response.text}")
+        msg_text = response.text
+        chat_history.append({"role": "model", "parts": [{"text": msg_text}]})
+        save_history(chat_history)
+
+        await context.bot.send_message(chat_id=USER_CHAT_ID, text=msg_text)
+        print(f"Periodic check-in sent: {msg_text}")
     except Exception as e:
-        print(f"Failed to send periodic check-in: {e}")
+        print(f"Failed proactive check-in: {e}")
 
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    
-    # Schedule periodic messages (e.g., every 4 to 8 hours)
-    # interval is in seconds: 14400 = 4 hours, 28800 = 8 hours
+
+    # Check every 4 hours for spontaneous check-ins
     app.job_queue.run_repeating(
-        send_random_checkin, 
-        interval=21600,  # Runs every 6 hours
-        first=7200       # First check-in 2 hours after launch
+        send_random_checkin,
+        interval=14400,
+        first=7200
     )
 
-    print("Bot is live with periodic check-ins enabled.")
+    print("Bot is live with full persistence, custom schedule, and conversational memory.")
     app.run_polling()
+
 if __name__ == "__main__":
     main()
