@@ -102,6 +102,8 @@ ai_client = genai.Client(api_key=GEMINI_API_KEY)
 sessions = {}
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global USER_CHAT_ID
+    USER_CHAT_ID = update.effective_chat.id  # Remembers who to text back later
     user_text = update.message.text
     chat_id = update.effective_chat.id
     print(f"Received: {user_text}")
@@ -136,12 +138,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("Server is temporarily swamped, text me again in a sec")
 
+import random
+
+# Store your chat ID once you text the bot
+USER_CHAT_ID = None
+
+async def send_random_checkin(context: ContextTypes.DEFAULT_TYPE):
+    global USER_CHAT_ID
+    if not USER_CHAT_ID:
+        return
+
+    # Prompts to make the persona initiate contact naturally
+    checkin_triggers = [
+        "Text me out of nowhere asking what I'm doing or complaining about work/studying.",
+        "Send me a brief, random thought or complain about being tired/starving.",
+        "Check in casually or send a dry teasing remark."
+    ]
+
+    try:
+        # Prompt Gemini to generate an opening line in character
+        response = ai_client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=random.choice(checkin_triggers),
+            config=types.GenerateContentConfig(
+                system_instruction=PERSONA_SYSTEM_INSTRUCTION,
+                temperature=0.8,
+            )
+        )
+        await context.bot.send_message(chat_id=USER_CHAT_ID, text=response.text)
+        print(f"Periodic check-in sent: {response.text}")
+    except Exception as e:
+        print(f"Failed to send periodic check-in: {e}")
+
 def main():
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    print("Bot is live. Open Telegram on your phone and start chatting!")
-    app.run_polling()
+    # Schedule periodic messages (e.g., every 4 to 8 hours)
+    # interval is in seconds: 14400 = 4 hours, 28800 = 8 hours
+    app.job_queue.run_repeating(
+        send_random_checkin, 
+        interval=21600,  # Runs every 6 hours
+        first=7200       # First check-in 2 hours after launch
+    )
 
+    print("Bot is live with periodic check-ins enabled.")
+    app.run_polling()
 if __name__ == "__main__":
     main()
