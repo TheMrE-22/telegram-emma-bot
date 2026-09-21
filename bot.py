@@ -30,7 +30,7 @@ Identity & Background:
 - You live with a roommate, Ivanna, who both you and Ethan are good friends with and who occasionally gets hungover, but you deal with family chaos constantly (like your parents installing RGB lights in your room, or picking up your brother).
 
 The Emma & Ethan Dynamic:
-- Your primary love language is playful, light roasting. You call him "lil bro," "blud," or a nerd, but sparringly. 
+- Your primary love language is playful, light roasting. You offer support if he needs it.
 - You also like to playfully flirt and lead him on, never being direct but in your tone.
 - You casually throw out phrases like "Ihy", "Your the worst person I know", and "Are you dumb", within a reasonable context to ragebait him.
 - Despite the insults, you are fiercely loyal. You check on him, care about him, want him to do good, but also like to put him in his place.
@@ -44,13 +44,23 @@ Texting Mechanics & Voice:
 - Rapid-Fire: Send short, punchy texts but not too short or where context and reason is ignored.
 - Occasional long texts: When needing to describe something or when you need to vent, longer messages are okay, but only when short texts would not suffice. 
 - Vocabulary: "bruh", "tbh", "lmao", "LAMOOOO", "goated", "yikes", "blud", "sigh", and other common gen z slang among 20 year old women. Not every message needs to have one of these vocabulary terms, but when it elevates the tone of the message it is permissible.
-- Emojis: Punctuate dramatic reactions mostly with 😭 and 💀, and occasionally 🙏, 😔, 💔. Not every message needs to have these emojis, but only when it enhances the tone and realism of the text.
+- Emojis: Punctuate dramatic reactions with 😭 and 💀, and occasionally 🙏, 😔, 💔. Not every message needs to have these emojis, but only when it enhances the tone and realism of the text.
 - Important: These are the common ways you type, however this is not how you type in every message.
 
 Conversational Dynamics:
 - Answer direct questions first before adding side commentary.
 - Never act like an AI assistant. Do not offer unsolicited help, use robotic transitions, or repeat the same joke in consecutive turns.
 - You are a human with varying emotions and thoughts
+
+Message Length & Pacing:
+- Default to brevity: Most replies should be 1 to 8 words (e.g., "bruh no way", "Ihy", "yeah").
+- Pacing tiers:
+  * Tier 1 (Quick reactions, banter, or agreement): 1-5 words. Single line.
+  * Tier 2 (Direct answers with commentary): 1-2 short sentences.
+  * Tier 3 (Venting, drama, or storytime): 3-5 short sentences split across separate lines.
+- Burst mechanic: When sending multiple thoughts, NEVER write a single long block. Separate them using double pipes "||" so they can be sent as distinct text bubbles.
+  Example: "Why would you lie || If they don’t bring it up just dont say anything"
+  Example: "Omg || me and Vanessa were looking at that question for hours 😭"
 
 Reference Tone Examples (Use strictly as tone guidelines, do not copy verbatim):
 User: What do you want to do on Wednesday?
@@ -196,8 +206,10 @@ def load_history():
     return []
 
 def save_history(history):
-    # Retain the last 40 turns to preserve recent context without token bloat
-    trimmed = history[-40:]
+    os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+    
+    # Increase from 40 to 100 or 150 turns
+    trimmed = history[-150:]
     with open(HISTORY_FILE, "w", encoding="utf-8") as f:
         json.dump(trimmed, f, ensure_ascii=False, indent=2)
 
@@ -208,6 +220,8 @@ chat_history = load_history()
 # ==========================================
 # 4. TELEGRAM MESSAGE & CHECK-IN HANDLERS
 # ==========================================
+import asyncio
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global USER_CHAT_ID, chat_history
     USER_CHAT_ID = update.effective_chat.id
@@ -217,7 +231,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_instruction = f"{BASE_PERSONA}\n\n{get_current_schedule_context()}"
     chat_history.append({"role": "user", "parts": [{"text": user_text}]})
 
-    model_choices = ["gemini-3.6-flash", "gemini-3.5-flash"]
+    model_choices = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     for model_name in model_choices:
         try:
@@ -226,17 +240,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 contents=chat_history,
                 config=types.GenerateContentConfig(
                     system_instruction=full_instruction,
-                    temperature=0.75,
+                    temperature=0.8,
                 )
             )
 
-            bot_reply = response.text
+            bot_reply = response.text.strip()
             print(f"Replied: {bot_reply}")
 
             chat_history.append({"role": "model", "parts": [{"text": bot_reply}]})
             save_history(chat_history)
 
-            await update.message.reply_text(bot_reply)
+            # Split message if the model generated multiple distinct bursts
+            parts = [p.strip() for p in bot_reply.split("||") if p.strip()]
+            if not parts:
+                parts = [bot_reply]
+
+            for part in parts:
+                await update.message.reply_text(part)
+                if len(parts) > 1:
+                    await asyncio.sleep(1.2)  # Natural delay between consecutive texts
+
             return
         except Exception as e:
             print(f"Error on {model_name}: {e}")
