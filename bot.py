@@ -231,7 +231,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_instruction = f"{BASE_PERSONA}\n\n{get_current_schedule_context()}"
     chat_history.append({"role": "user", "parts": [{"text": user_text}]})
 
-    model_choices = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    model_choices = ["gemini-3.6-flash", "gemini-3.5-flash-lite"]
 
     for model_name in model_choices:
         try:
