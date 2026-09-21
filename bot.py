@@ -15,7 +15,7 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 USER_CHAT_ID = 8750895461
 
-HISTORY_FILE = "chat_history.json"
+HISTORY_FILE = "/app/data/chat_history.json"
 TIMEZONE = pytz.timezone("America/Chicago")  # Central Time (Texas)
 
 # ==========================================
