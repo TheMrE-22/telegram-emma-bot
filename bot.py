@@ -13,7 +13,7 @@ from google.genai import types
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-USER_CHAT_ID = None  # Automatically populated when you send your first message
+USER_CHAT_ID = 8750895461
 
 HISTORY_FILE = "chat_history.json"
 TIMEZONE = pytz.timezone("America/Chicago")  # Central Time (Texas)
